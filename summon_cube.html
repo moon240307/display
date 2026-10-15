@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>召喚六方體動畫</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0907;display:flex;align-items:center;justify-content:center;font-family:system-ui,"Noto Sans TC",sans-serif;color:#fff}
+  /* 若想疊在自己的背景圖上,把下面 background 改成 url(你的圖.png) center/cover */
+  #stage{position:relative;width:450px;height:800px;overflow:hidden;
+    background: url(back.png) center/cover;
+    border:1px solid #333}
+  #cubeWrap{position:absolute;left:14px;top:90px;width:150px;height:150px;perspective:700px}
+  #tilt{width:100%;height:100%;transform-style:preserve-3d;transform:rotateX(-18deg) rotateY(-24deg)}
+  #cube{position:relative;width:100%;height:100%;transform-style:preserve-3d}
+  .face{position:absolute;inset:0;border:1px solid rgba(255,255,255,.55);box-sizing:border-box;
+    display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:800;color:rgba(255,255,255,.85);
+    text-shadow:0 0 8px rgba(0,0,0,.35);backface-visibility:visible}
+  .f1{transform:translateZ(75px);background:linear-gradient(135deg,#b6ffe9,#c9b8ff 45%,#ffd6f2 75%,#fff7b0)}
+  .f2{transform:rotateY(90deg) translateZ(75px);background:linear-gradient(200deg,#ffc9e8,#bdf2ff 50%,#d9ffbf)}
+  .f3{transform:rotateY(180deg) translateZ(75px);background:linear-gradient(45deg,#fff1b8,#ffc0d8 40%,#b8c8ff 80%)}
+  .f4{transform:rotateY(-90deg) translateZ(75px);background:linear-gradient(160deg,#c7ffd9,#b2e8ff 50%,#e3c4ff)}
+  .f5{transform:rotateX(90deg) translateZ(75px);background:linear-gradient(90deg,#ffe0f5,#c5fff0 50%,#fff2b5)}
+  .f6{transform:rotateX(-90deg) translateZ(75px);background:linear-gradient(300deg,#c4d4ff,#ffd1e6 50%,#c9ffcf)}
+  #glow{position:absolute;left:-20px;top:70px;width:190px;height:190px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.9),rgba(160,220,255,.4) 40%,transparent 70%);opacity:0;pointer-events:none;mix-blend-mode:screen}
+  #bar{position:absolute;left:37px;top:216px;width:54px;display:flex;flex-direction:column;gap:2px}
+  .seg{height:20px;opacity:.13;transition:none}
+  .seg.on{opacity:1;box-shadow:0 0 8px currentColor}
+  #label{position:absolute;left:0;right:0;bottom:70px;text-align:center;font-size:18px;letter-spacing:2px;color:#ffe9a8;
+    text-shadow:0 0 10px rgba(0,0,0,.8)}
+  #btn{position:absolute;right:12px;bottom:12px;padding:8px 18px;border:0;border-radius:8px;background:#a45bd6;color:#fff;font-size:15px;cursor:pointer}
+  #ring{position:absolute;left:14px;top:90px;width:150px;height:150px;border-radius:50%;border:3px solid #fff;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="glow"></div>
+  <div id="ring"></div>
+  <div id="cubeWrap"><div id="tilt"><div id="cube">
+    <div class="face f1">1</div><div class="face f2">2</div><div class="face f3">3</div>
+    <div class="face f4">4</div><div class="face f5">5</div><div class="face f6">6</div>
+  </div></div></div>
+  <div id="bar"></div>
+  <div id="label">準備中…</div>
+  <button id="btn">▶ 重播</button>
+</div>
+
+<script>
+/* ===== 可調參數 ===== */
+const SEG = 24;            // 頻譜格數
+const T_IDLE  = 2.5;       // 階段1:六方體緩慢轉動(秒)
+const T_RISE  = 4.5;       // 階段2:頻譜上升(秒)
+const T_SPIN  = 5.0;       // 階段3:快速轉動→減速→停住(秒)
+const IDLE_SPEED = 25;     // 慢速轉動(度/秒)
+const TARGET_FACE = null;  // 0~5 指定停在哪一面;null = 隨機
+/* ==================== */
+
+const bar = document.getElementById('bar');
+const segs = [];
+for (let i = 0; i < SEG; i++) {
+  const d = document.createElement('div');
+  d.className = 'seg';
+  const hue = (i / (SEG - 1)) * 270;           // 上紅 → 下紫
+  d.style.background = `hsl(${hue},100%,50%)`;
+  d.style.color = `hsl(${hue},100%,50%)`;
+  bar.appendChild(d); segs.push(d);
+}
+const cube = document.getElementById('cube');
+const glow = document.getElementById('glow');
+const ring = document.getElementById('ring');
+const label = document.getElementById('label');
+
+// 每一面對應的最終 (rx, ry)
+const faces = [[0,0],[0,-90],[0,-180],[0,90],[-90,0],[90,0]];
+const easeOut = t => 1 - Math.pow(1 - t, 4);
+const easeInOut = t => t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
+
+let t0, rx = 0, ry = 0, idleEnd = {rx:0, ry:0}, spinPlan = null, running = false;
+
+function setCube(x, y){ cube.style.transform = `rotateX(${x}deg) rotateY(${y}deg)`; }
+function litCount(n){ segs.forEach((s,i)=> s.classList.toggle('on', (SEG-1-i) < n)); }
+
+function start(){
+  t0 = performance.now(); rx = 20; ry = 0; spinPlan = null; running = true;
+  litCount(0); glow.style.opacity = 0; ring.style.opacity = 0;
+  label.textContent = '準備中…';
+  requestAnimationFrame(frame);
+}
+
+function frame(now){
+  if(!running) return;
+  const t = (now - t0) / 1000;
+
+  if (t < T_IDLE + T_RISE) {
+    // 階段1+2:慢速自轉
+    const a = t * IDLE_SPEED;
+    setCube(20 + Math.sin(t*0.8)*6, a);
+    rx = 20 + Math.sin(t*0.8)*6; ry = a;
+
+    if (t > T_IDLE) {
+      // 階段2:頻譜升高
+      const p = easeInOut(Math.min(1,(t - T_IDLE)/T_RISE));
+      const n = p * SEG;
+      litCount(Math.floor(n + (Math.random()<.5 ? 0 : 1)*(p<1?1:0)));  // 頂端有些抖動
+      label.textContent = '能量充填中…';
+      // 接近撞擊時方塊微微震動
+      if (p > .9) setCube(rx + (Math.random()-.5)*3, ry + (Math.random()-.5)*3);
+    }
+  } else {
+    // 階段3:撞擊 → 快速轉 → 慢下來 → 停在某一面
+    if (!spinPlan) {
+      litCount(SEG);
+      const fi = TARGET_FACE ?? Math.floor(Math.random()*6);
+      const [fx, fy] = faces[fi];
+      // 從目前角度出發,多轉幾圈後落在目標面
+      const dy = (Math.ceil((ry - fy)/360) + 5) * 360 + fy - ry;
+      const dx = (Math.ceil((rx - fx)/360) + 3) * 360 + fx - rx;
+      spinPlan = {x0: rx, y0: ry, dx, dy, face: fi + 1, start: now};
+      label.textContent = '召喚中!';
+    }
+    const u = Math.min(1, (now - spinPlan.start)/1000 / T_SPIN);
+    const e = easeOut(u);
+    setCube(spinPlan.x0 + spinPlan.dx*e, spinPlan.y0 + spinPlan.dy*e);
+
+    // 撞擊閃光與衝擊波
+    const k = Math.min(1,(now - spinPlan.start)/700);
+    glow.style.opacity = (1-k) * 1;
+    ring.style.opacity = (1-k) * .9;
+    ring.style.transform = `scale(${1 + k*1.6})`;
+    // 頻譜在撞擊後逐漸退去
+    if (u > .15) litCount(Math.round(SEG * (1 - easeOut((u-.15)/.85))));
+
+    if (u >= 1) {
+      label.textContent = `停在第 ${spinPlan.face} 面`;
+      running = false; return;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('btn').onclick = start;
+document.getElementById('stage').onclick = e => { if(e.target.id==='stage') start(); };
+start();
+</script>
+</body>
+</html>
