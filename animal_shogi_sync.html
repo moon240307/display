@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>同步預測版：動物將棋（屬性對決）</title>
+<style>
+  :root {
+    --bg-color: #fdf6e3;
+    --board-bg: #e6ccb2;
+    --cell-bg: #fff8eb;
+    --cell-border: #b08968;
+    --blue-color: #2b6cb0;
+    --blue-bg: #ebf8ff;
+    --red-color: #c53030;
+    --red-bg: #fff5f5;
+    --highlight: #fef08a;
+    --target-move: #bbf7d0;
+  }
+  * { box-sizing: border-box; font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; }
+  body {
+    background-color: var(--bg-color);
+    color: #3d2c1e;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 { margin: 0 0 8px 0; font-size: 1.6rem; color: #5c3a21; }
+  .subtitle { font-size: 0.9rem; color: #7f5539; margin-bottom: 15px; text-align: center; }
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    padding: 8px 16px;
+    font-size: 0.95rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .btn-mode { background: #ddb892; color: #3d2c1e; }
+  .btn-mode.active { background: #7f5539; color: #fff; }
+  .btn-exec { background: #2f855a; color: white; font-size: 1.1rem; padding: 10px 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+  .btn-exec:hover { background: #276749; transform: translateY(-1px); }
+  .btn-exec:disabled { background: #a0aec0; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn-reset { background: #e53e3e; color: white; }
+
+  .game-area {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+  }
+  .board-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--board-bg);
+    padding: 15px;
+    border-radius: 14px;
+    box-shadow: 0 6px 15px rgba(0,0,0,0.12);
+    border: 3px solid #9c6644;
+  }
+  .hand-zone {
+    width: 100%;
+    min-height: 58px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    margin: 6px 0;
+    border: 1px dashed #9c6644;
+  }
+  .hand-label { font-size: 0.8rem; font-weight: bold; color: #5c3a21; }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, 92px);
+    grid-template-rows: repeat(4, 92px);
+    gap: 6px;
+    background: #b08968;
+    padding: 6px;
+    border-radius: 8px;
+  }
+  .cell {
+    background: var(--cell-bg);
+    border-radius: 6px;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .cell.zone-red { background: #fff0f0; }
+  .cell.zone-blue { background: #f0f8ff; }
+  .cell.selected { background: var(--highlight) !important; box-shadow: inset 0 0 0 3px #d69e2e; }
+  .cell.valid-target { background: var(--target-move) !important; }
+  .cell.valid-target::after {
+    content: "●";
+    color: #2f855a;
+    font-size: 1.4rem;
+    opacity: 0.7;
+  }
+  .cell.planned-from { box-shadow: inset 0 0 0 3px #3182ce; }
+  .cell.planned-to { box-shadow: inset 0 0 0 3px #38a169; background: #c6f6d5 !important; }
+
+  .piece {
+    width: 76px;
+    height: 76px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    user-select: none;
+    box-shadow: 0 3px 5px rgba(0,0,0,0.2);
+    transition: transform 0.15s;
+  }
+  .piece.blue {
+    background: var(--blue-bg);
+    border: 2.5px solid var(--blue-color);
+    color: var(--blue-color);
+  }
+  .piece.red {
+    background: var(--red-bg);
+    border: 2.5px solid var(--red-color);
+    color: var(--red-color);
+    transform: rotate(180deg);
+  }
+  .piece.mini {
+    width: 46px;
+    height: 46px;
+    transform: none !important;
+    cursor: pointer;
+  }
+  .piece.mini .emoji { font-size: 1.3rem; }
+  .piece.mini .name { font-size: 0.65rem; }
+  .piece.mini .dot { display: none; }
+  .piece.mini.selected { box-shadow: 0 0 0 3px #d69e2e; background: var(--highlight); }
+
+  .emoji { font-size: 2rem; line-height: 1.1; }
+  .name { font-size: 0.75rem; font-weight: bold; }
+  .attr-badge {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    font-size: 0.6rem;
+    background: rgba(0,0,0,0.08);
+    padding: 0 3px;
+    border-radius: 3px;
+  }
+
+  .dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #e53e3e;
+    border-radius: 50%;
+  }
+  .d-n  { top: 3px; left: 50%; transform: translateX(-50%); }
+  .d-s  { bottom: 3px; left: 50%; transform: translateX(-50%); }
+  .d-w  { left: 3px; top: 50%; transform: translateY(-50%); }
+  .d-e  { right: 3px; top: 50%; transform: translateY(-50%); }
+  .d-nw { top: 4px; left: 4px; }
+  .d-ne { top: 4px; right: 4px; }
+  .d-sw { bottom: 4px; left: 4px; }
+  .d-se { bottom: 4px; right: 4px; }
+
+  .sidebar {
+    width: 320px;
+    background: #fff;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    border: 1px solid #e2e8f0;
+  }
+  .status-box {
+    background: #edf2f7;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-weight: bold;
+    text-align: center;
+    color: #2d3748;
+    line-height: 1.5;
+  }
+  .rule-box {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #4a5568;
+    background: #fffaf0;
+    padding: 10px;
+    border-radius: 8px;
+    border-left: 4px solid #dd6b20;
+    margin-bottom: 12px;
+  }
+  .log-box {
+    height: 180px;
+    overflow-y: auto;
+    background: #1a202c;
+    color: #e2e8f0;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .log-entry { margin-bottom: 6px; border-bottom: 1px solid #2d3748; padding-bottom: 4px; }
+  .log-clash { color: #fbd38d; font-weight: bold; }
+  .log-win { color: #68d391; font-weight: bold; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+
+<h1>🦁 同步預測版：動物將棋</h1>
+<div class="subtitle">雙方同時下達指令，按下「執行刷新」才同步移動！撞格時依動物屬性直接決鬥！</div>
+
+<div class="controls">
+  <button id="modeAiBtn" class="btn-mode active" onclick="setMode('AI')">🤖 單人對戰 AI</button>
+  <button id="modePvpBtn" class="btn-mode" onclick="setMode('PVP')">👥 雙人盲選對戰</button>
+  <button class="btn-reset" onclick="initGame()">🔄 重新開局</button>
+</div>
+
+<div class="game-area">
+  <div class="board-container">
+    <div class="hand-label">🔴 紅方俘虜區（點擊可空降）</div>
+    <div id="redHand" class="hand-zone"></div>
+
+    <div id="board" class="board"></div>
+
+    <div id="blueHand" class="hand-zone"></div>
+    <div class="hand-label">🔵 藍方俘虜區（點擊可空降）</div>
+
+    <div style="margin-top: 14px;">
+      <button id="execBtn" class="btn-exec" onclick="executeTurn()" disabled>⚡ 執行本回合（刷新動作）</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div id="statusBox" class="status-box">請藍方選擇要移動的棋子與目標格</div>
+
+    <div class="rule-box">
+      <strong>⚔️ 同格對撞「屬性相剋」規則：</strong><br>
+      1. <strong>力量壓制：</strong>獅子(5) ＞ 大象(4) ＞ 長頸鹿(3) ＞ 公雞(2) ＞ 小雞(1)<br>
+      2. <strong>生態逆轉：</strong><span style="color:#c53030;font-weight:bold;">小雞(1) 剋 大象(4)</span>（小雞靈活鑽擊直接勝出！）<br>
+      3. <strong>同級對撞：</strong>階級相同時雙方彈回原位。<br>
+      4. <strong>勝利條件：</strong>吃掉敵方獅子，或獅子安全抵達敵方底線。
+    </div>
+
+    <div style="font-weight:bold; font-size:0.85rem; margin-bottom:4px;">📜 戰況紀錄：</div>
+    <div id="logBox" class="log-box"></div>
+  </div>
+</div>
+
+<script>
+const PIECE_DEFS = {
+  lion:     { name: '獅子', emoji: '🦁', rank: 5, attr: '霸主', dirs: [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]] },
+  elephant: { name: '大象', emoji: '🐘', rank: 4, attr: '重裝', dirs: [[-1,-1],[-1,1],[1,-1],[1,1]] },
+  giraffe:  { name: '長頸鹿', emoji: '🦒', rank: 3, attr: '長程', dirs: [[-1,0],[1,0],[0,-1],[0,1]] },
+  hen:      { name: '公雞', emoji: '🐓', rank: 2, attr: '覺醒', dirs: [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,0]] },
+  chick:    { name: '小雞', emoji: '🐥', rank: 1, attr: '靈巧', dirs: [[-1,0]] }
+};
+
+let gameMode = 'AI';
+let board = [];
+let hands = { blue: [], red: [] };
+let turnCount = 1;
+let gameOver = false;
+
+let currentPhase = 'blue';
+let selectedSource = null;
+let validTargets = [];
+let plannedMoves = { blue: null, red: null };
+
+function setMode(mode) {
+  gameMode = mode;
+  document.getElementById('modeAiBtn').classList.toggle('active', mode === 'AI');
+  document.getElementById('modePvpBtn').classList.toggle('active', mode === 'PVP');
+  initGame();
+}
+
+function initGame() {
+  board = Array.from({ length: 4 }, () => Array(3).fill(null));
+  
+  board[0][0] = { type: 'giraffe', owner: 'red' };
+  board[0][1] = { type: 'lion', owner: 'red' };
+  board[0][2] = { type: 'elephant', owner: 'red' };
+  board[1][1] = { type: 'chick', owner: 'red' };
+
+  board[3][0] = { type: 'elephant', owner: 'blue' };
+  board[3][1] = { type: 'lion', owner: 'blue' };
+  board[3][2] = { type: 'giraffe', owner: 'blue' };
+  board[2][1] = { type: 'chick', owner: 'blue' };
+
+  hands = { blue: [], red: [] };
+  turnCount = 1;
+  gameOver = false;
+  currentPhase = 'blue';
+  selectedSource = null;
+  validTargets = [];
+  plannedMoves = { blue: null, red: null };
+
+  document.getElementById('logBox').innerHTML = '';
+  addLog(`🎮 遊戲開始！模式：${gameMode === 'AI' ? '單人對戰 AI' : '雙人盲選對戰'}`);
+  updateUI();
+}
+
+function getValidTargets(source, owner) {
+  let targets = [];
+  if (source.type === 'board') {
+    const piece = board[source.r][source.c];
+    const def = PIECE_DEFS[piece.type];
+    const dirMult = owner === 'blue' ? 1 : -1;
+    for (let [dr, dc] of def.dirs) {
+      let nr = source.r + dr * dirMult;
+      let nc = source.c + dc * dirMult;
+      if (nr >= 0 && nr < 4 && nc >= 0 && nc < 3) {
+        if (!board[nr][nc] || board[nr][nc].owner !== owner) {
+          targets.push({ r: nr, c: nc });
+        }
+      }
+    }
+  } else if (source.type === 'hand') {
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 3; c++) {
+        if (!board[r][c]) {
+          targets.push({ r, c });
+        }
+      }
+    }
+  }
+  return targets;
+}
+
+function handleCellClick(r, c) {
+  if (gameOver) return;
+  if (currentPhase === 'ready' && gameMode === 'AI') {
+    currentPhase = 'blue';
+    plannedMoves.blue = null;
+  }
+  if (currentPhase === 'ready' && gameMode === 'PVP') return;
+
+  const activePlayer = currentPhase;
+
+  if (selectedSource && validTargets.some(t => t.r === r && t.c === c)) {
+    plannedMoves[activePlayer] = {
+      source: { ...selectedSource },
+      target: { r, c }
+    };
+    selectedSource = null;
+    validTargets = [];
+
+    if (gameMode === 'AI') {
+      currentPhase = 'ready';
+    } else {
+      if (activePlayer === 'blue') {
+        currentPhase = 'red';
+      } else {
+        currentPhase = 'ready';
+      }
+    }
+    updateUI();
+    return;
+  }
+
+  const cellPiece = board[r][c];
+  if (cellPiece && cellPiece.owner === activePlayer) {
+    selectedSource = { type: 'board', r, c };
+    validTargets = getValidTargets(selectedSource, activePlayer);
+  } else {
+    selectedSource = null;
+    validTargets = [];
+  }
+  updateUI();
+}
+
+function handleHandClick(owner, index) {
+  if (gameOver) return;
+  if (currentPhase === 'ready' && gameMode === 'AI') {
+    currentPhase = 'blue';
+    plannedMoves.blue = null;
+  }
+  if (owner !== currentPhase) return;
+
+  selectedSource = { type: 'hand', owner, index };
+  validTargets = getValidTargets(selectedSource, owner);
+  updateUI();
+}
+
+function generateAIMove() {
+  let allMoves = [];
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 3; c++) {
+      if (board[r][c] && board[r][c].owner === 'red') {
+        let src = { type: 'board', r, c };
+        let tgts = getValidTargets(src, 'red');
+        tgts.forEach(t => allMoves.push({ source: src, target: t }));
+      }
+    }
+  }
+  hands.red.forEach((pType, idx) => {
+    let src = { type: 'hand', owner: 'red', index: idx };
+    let tgts = getValidTargets(src, 'red');
+    tgts.forEach(t => allMoves.push({ source: src, target: t }));
+  });
+
+  if (allMoves.length === 0) return null;
+
+  allMoves.sort(() => Math.random() - 0.5);
+  allMoves.sort((a, b) => {
+    let scoreA = a.target.r * 2 + (board[a.target.r][a.target.c] ? 5 : 0);
+    let scoreB = b.target.r * 2 + (board[b.target.r][b.target.c] ? 5 : 0);
+    return scoreB - scoreA;
+  });
+  return allMoves[0];
+}
+
+function resolveClash(blueType, redType) {
+  if (blueType === redType) return 'draw';
+  if (blueType === 'chick' && redType === 'elephant') return 'blue';
+  if (redType === 'chick' && blueType === 'elephant') return 'red';
+
+  const rankB = PIECE_DEFS[blueType].rank;
+  const rankR = PIECE_DEFS[redType].rank;
+  if (rankB > rankR) return 'blue';
+  if (rankR > rankB) return 'red';
+  return 'draw';
+}
+
+function executeTurn() {
+  if (gameOver || !plannedMoves.blue) return;
+  if (gameMode === 'AI') {
+    plannedMoves.red = generateAIMove();
+  }
+  if (!plannedMoves.red) return;
+
+  addLog(`--- 第 ${turnCount} 回合同步執行 ---`);
+
+  const moveB = plannedMoves.blue;
+  const moveR = plannedMoves.red;
+
+  const pieceB = moveB.source.type === 'board'
+    ? { ...board[moveB.source.r][moveB.source.c] }
+    : { type: hands.blue[moveB.source.index], owner: 'blue' };
+
+  const pieceR = moveR.source.type === 'board'
+    ? { ...board[moveR.source.r][moveR.source.c] }
+    : { type: hands.red[moveR.source.index], owner: 'red' };
+
+  if (moveB.source.type === 'board') board[moveB.source.r][moveB.source.c] = null;
+  else hands.blue.splice(moveB.source.index, 1);
+
+  if (moveR.source.type === 'board') board[moveR.source.r][moveR.source.c] = null;
+  else hands.red.splice(moveR.source.index, 1);
+
+  const sameTarget = (moveB.target.r === moveR.target.r && moveB.target.c === moveR.target.c);
+  const headOnSwap = (
+    moveB.source.type === 'board' && moveR.source.type === 'board' &&
+    moveB.target.r === moveR.source.r && moveB.target.c === moveR.source.c &&
+    moveR.target.r === moveB.source.r && moveR.target.c === moveB.source.c
+  );
+
+  if (sameTarget || headOnSwap) {
+    const clashResult = resolveClash(pieceB.type, pieceR.type);
+    const nameB = PIECE_DEFS[pieceB.type].name;
+    const nameR = PIECE_DEFS[pieceR.type].name;
+
+    if (clashResult === 'blue') {
+      addLog(`⚔️ 屬性對決！🔵${nameB} 擊敗了 🔴${nameR}！`, 'log-clash');
+      capturePiece('blue', pieceR.type);
+      placePiece(pieceB, moveB.target.r, moveB.target.c, moveB.source.type === 'board');
+    } else if (clashResult === 'red') {
+      addLog(`⚔️ 屬性對決！🔴${nameR} 擊敗了 🔵${nameB}！`, 'log-clash');
+      capturePiece('red', pieceB.type);
+      placePiece(pieceR, moveR.target.r, moveR.target.c, moveR.source.type === 'board');
+    } else {
+      addLog(`💥 同級對撞！🔵${nameB} 與 🔴${nameR} 勢均力敵，雙雙彈回原處！`, 'log-clash');
+      returnToOrigin(pieceB, moveB.source);
+      returnToOrigin(pieceR, moveR.source);
+    }
+  } else {
+    const targetCellForB = board[moveB.target.r][moveB.target.c];
+    if (targetCellForB && targetCellForB.owner === 'red') {
+      addLog(`🔵${PIECE_DEFS[pieceB.type].name} 突襲吃掉了未移動的 🔴${PIECE_DEFS[targetCellForB.type].name}！`);
+      capturePiece('blue', targetCellForB.type);
+    } else {
+      addLog(`🔵${PIECE_DEFS[pieceB.type].name} ${moveB.source.type === 'hand' ? '空降至' : '移動至'} (${moveB.target.r+1},${moveB.target.c+1})`);
+    }
+    placePiece(pieceB, moveB.target.r, moveB.target.c, moveB.source.type === 'board');
+
+    const targetCellForR = board[moveR.target.r][moveR.target.c];
+    if (targetCellForR && targetCellForR.owner === 'blue') {
+      addLog(`🔴${PIECE_DEFS[pieceR.type].name} 突襲吃掉了未移動的 🔵${PIECE_DEFS[targetCellForR.type].name}！`);
+      capturePiece('red', targetCellForR.type);
+    } else {
+      addLog(`🔴${PIECE_DEFS[pieceR.type].name} ${moveR.source.type === 'hand' ? '空降至' : '移動至'} (${moveR.target.r+1},${moveR.target.c+1})`);
+    }
+    placePiece(pieceR, moveR.target.r, moveR.target.c, moveR.source.type === 'board');
+  }
+
+  checkVictory();
+
+  if (!gameOver) {
+    turnCount++;
+    currentPhase = 'blue';
+    plannedMoves = { blue: null, red: null };
+    selectedSource = null;
+    validTargets = [];
+  }
+  updateUI();
+}
+
+function capturePiece(winnerOwner, capturedType) {
+  const baseType = capturedType === 'hen' ? 'chick' : capturedType;
+  hands[winnerOwner].push(baseType);
+}
+
+function placePiece(piece, r, c, canPromote) {
+  if (canPromote && piece.type === 'chick') {
+    if ((piece.owner === 'blue' && r === 0) || (piece.owner === 'red' && r === 3)) {
+      piece.type = 'hen';
+      addLog(`✨ ${piece.owner === 'blue' ? '🔵藍方' : '🔴紅方'}的小雞抵達底線，覺醒成「公雞」！`);
+    }
+  }
+  board[r][c] = piece;
+}
+
+function returnToOrigin(piece, source) {
+  if (source.type === 'board') {
+    board[source.r][source.c] = piece;
+  } else {
+    hands[piece.owner].push(piece.type);
+  }
+}
+
+function checkVictory() {
+  let blueLionPos = null;
+  let redLionPos = null;
+
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 3; c++) {
+      if (board[r][c]?.type === 'lion') {
+        if (board[r][c].owner === 'blue') blueLionPos = { r, c };
+        if (board[r][c].owner === 'red') redLionPos = { r, c };
+      }
+    }
+  }
+
+  if (!redLionPos && !blueLionPos) {
+    endGame('🤝 雙方獅子同時陣亡，平手！');
+  } else if (!redLionPos) {
+    endGame('🎉 藍方捕獲了紅方獅子，藍方獲勝！');
+  } else if (!blueLionPos) {
+    endGame('🎉 紅方捕獲了藍方獅子，紅方獲勝！');
+  } else if (blueLionPos.r === 0 && redLionPos.r === 3) {
+    endGame('🤝 雙方獅子同時衝破底線，平手！');
+  } else if (blueLionPos.r === 0) {
+    endGame('👑 藍方獅子成功進駐敵方底線，藍方獲勝！');
+  } else if (redLionPos.r === 3) {
+    endGame('👑 紅方獅子成功進駐敵方底線，紅方獲勝！');
+  }
+}
+
+function endGame(msg) {
+  gameOver = true;
+  addLog(msg, 'log-win');
+  document.getElementById('statusBox').innerText = msg;
+}
+
+function addLog(text, className = '') {
+  const box = document.getElementById('logBox');
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + className;
+  div.innerText = text;
+  box.prepend(div);
+}
+
+function renderDots(dirs) {
+  const map = {
+    '-1,0': 'd-n', '1,0': 'd-s', '0,-1': 'd-w', '0,1': 'd-e',
+    '-1,-1': 'd-nw', '-1,1': 'd-ne', '1,-1': 'd-sw', '1,1': 'd-se'
+  };
+  return dirs.map(([r, c]) => `<span class="dot ${map[`${r},${c}`]}"></span>`).join('');
+}
+
+function updateUI() {
+  const statusBox = document.getElementById('statusBox');
+  const execBtn = document.getElementById('execBtn');
+
+  if (!gameOver) {
+    if (currentPhase === 'blue') {
+      statusBox.innerHTML = `【第 ${turnCount} 回合】請 <span style="color:#2b6cb0">🔵 藍方</span> 選擇棋子與目標格`;
+      execBtn.disabled = true;
+    } else if (currentPhase === 'red') {
+      statusBox.innerHTML = `🔵 藍方已鎖定！請 <span style="color:#c53030">🔴 紅方</span> 盲選棋子與目標格`;
+      execBtn.disabled = true;
+    } else if (currentPhase === 'ready') {
+      statusBox.innerHTML = `✅ 雙方指令已就緒！<br>請點擊下方「執行本回合」揭曉結果`;
+      execBtn.disabled = false;
+    }
+  } else {
+    execBtn.disabled = true;
+  }
+
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 3; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      if (r === 0) cell.classList.add('zone-red');
+      if (r === 3) cell.classList.add('zone-blue');
+
+      if (selectedSource && selectedSource.type === 'board' && selectedSource.r === r && selectedSource.c === c) {
+        cell.classList.add('selected');
+      }
+      if (validTargets.some(t => t.r === r && t.c === c)) {
+        cell.classList.add('valid-target');
+      }
+
+      if (gameMode === 'AI' && plannedMoves.blue) {
+        if (plannedMoves.blue.source.type === 'board' && plannedMoves.blue.source.r === r && plannedMoves.blue.source.c === c) {
+          cell.classList.add('planned-from');
+        }
+        if (plannedMoves.blue.target.r === r && plannedMoves.blue.target.c === c) {
+          cell.classList.add('planned-to');
+        }
+      }
+
+      cell.onclick = () => handleCellClick(r, c);
+
+      const piece = board[r][c];
+      if (piece) {
+        const def = PIECE_DEFS[piece.type];
+        const pDiv = document.createElement('div');
+        pDiv.className = `piece ${piece.owner}`;
+        pDiv.innerHTML = `
+          ${renderDots(def.dirs)}
+          <div class="emoji">${def.emoji}</div>
+          <div class="name">${def.name}</div>
+          <div class="attr-badge">Lv.${def.rank}</div>
+        `;
+        cell.appendChild(pDiv);
+      }
+      boardEl.appendChild(cell);
+    }
+  }
+
+  ['blue', 'red'].forEach(owner => {
+    const handEl = document.getElementById(owner + 'Hand');
+    handEl.innerHTML = '';
+    hands[owner].forEach((pType, idx) => {
+      const def = PIECE_DEFS[pType];
+      const pDiv = document.createElement('div');
+      pDiv.className = `piece mini ${owner}`;
+      if (selectedSource && selectedSource.type === 'hand' && selectedSource.owner === owner && selectedSource.index === idx) {
+        pDiv.classList.add('selected');
+      }
+      pDiv.innerHTML = `<div class="emoji">${def.emoji}</div><div class="name">${def.name}</div>`;
+      pDiv.onclick = () => handleHandClick(owner, idx);
+      handEl.appendChild(pDiv);
+    });
+  });
+}
+
+initGame();
+</script>
+</body>
+</html>
